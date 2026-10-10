@@ -142,7 +142,7 @@ def account_from_html(html: str) -> str:
 
 
 def parse_chart(payload: object) -> dict[int, float]:
-    """Validate, deduplicate and sort hourly readings (UTC epoch seconds)."""
+    """Validate epoch-encoded local wall hours; coordinator applies the timezone."""
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
         raise WaterSmartError("Unexpected RealTimeChart response")
     data = payload["data"]
