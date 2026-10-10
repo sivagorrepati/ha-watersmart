@@ -11,10 +11,12 @@ from .coordinator import WaterSmartCoordinator
 PLATFORMS = [Platform.SENSOR]
 
 
-def create_client(hass, data) -> WaterSmartClient:
+def create_client(hass, data, *, auto_cleanup: bool = True) -> WaterSmartClient:
     """Use a separate cookie jar so different entries cannot share sessions."""
     session = async_create_clientsession(
         hass,
+        auto_cleanup=auto_cleanup,
+        connector_owner=False,
         cookie_jar=aiohttp.CookieJar(),
         timeout=aiohttp.ClientTimeout(total=60),
     )
@@ -32,8 +34,9 @@ async def async_setup_entry(hass, entry) -> bool:
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    except Exception:
-        await client.session.close()
+    except BaseException:
+        # Home Assistant owns the shared connector; release only this session.
+        client.session.detach()
         raise
     return True
 
@@ -41,7 +44,7 @@ async def async_setup_entry(hass, entry) -> bool:
 async def async_unload_entry(hass, entry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        await entry.runtime_data.client.session.close()
+        entry.runtime_data.client.session.detach()
     return unloaded
 
 

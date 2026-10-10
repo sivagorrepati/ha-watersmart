@@ -6,11 +6,25 @@ The active account number is discovered from the portal.
 
 ## Install
 
+Requires Home Assistant 2026.10 or newer. Tested against 2026.10.1.
+No YAML configuration or additional runtime packages are required.
+
 ### HACS
 
-Add `https://github.com/sivagorrepati/ha-watersmart` under HACS → Custom repositories
-with category **Integration**, then download **WaterSmart** and restart Home Assistant.
-This repository is installed as a custom repository; it is not listed in the default store.
+Install and configure [HACS](https://www.hacs.dev/) first if it is not already
+available. WaterSmart is a custom repository and is not listed in the default
+HACS store.
+
+1. Open **HACS** in the Home Assistant sidebar.
+2. Select the **⋮** menu in the upper-right corner, then **Custom repositories**.
+3. Enter `https://github.com/sivagorrepati/ha-watersmart` in **Repository**.
+4. Choose **Integration** as the repository type/category and select **Add**.
+5. Close the custom repositories dialog, search HACS for **WaterSmart**, and open it.
+6. Select **Download**, confirm the version to install, and wait for it to finish.
+7. Restart Home Assistant, then follow **Configure WaterSmart** below.
+
+See the [HACS custom repository instructions](https://www.hacs.dev/docs/faq/custom_repositories/)
+for details about adding a GitHub repository.
 
 ### Manual
 
@@ -21,12 +35,59 @@ and extract it into your Home Assistant configuration directory. Alternatively:
 1. Copy `custom_components/watersmart` into your Home Assistant configuration
    directory under `custom_components/watersmart`.
 2. Restart Home Assistant.
-3. Open **Settings → Devices & services → Add integration → WaterSmart**.
-4. Enter your utility portal URL (defaults to `https://milpitas.watersmart.com`),
-   email, and password.
+3. Follow **Configure WaterSmart** below.
 
-Requires Home Assistant 2026.10 or newer. Tested against 2026.10.1.
-No YAML configuration or additional runtime packages are required.
+## Configure WaterSmart
+
+1. Open **Settings → Devices & services → Add integration**.
+2. Search for and select **WaterSmart**.
+3. Enter your utility portal URL (defaults to `https://milpitas.watersmart.com`),
+   email, and password.
+4. Submit the form and wait for the first download to complete. The integration
+   discovers your active account number and creates its hourly water usage sensor.
+
+## Add water usage to the Energy dashboard
+
+Complete WaterSmart setup and its first successful download before adding water
+consumption. The integration imports historical readings into long-term statistics
+using their original hourly timestamps.
+
+1. Open **Settings → Dashboards → Energy**.
+2. Find the **Water consumption** section and select **Add water source** to open
+   the **Configure water consumption** dialog.
+3. In **Water consumption**, select **WaterSmart <account_number> hourly water usage**
+   with **WaterSmart** shown as its source. For example, the fictional account `1234567` appears
+   as **WaterSmart 1234567 hourly water usage** and uses statistic ID
+   `watersmart:1234567_water_usage_hourly`.
+4. Leave **Water flow rate** empty. This integration provides hourly consumption
+   in gallons and does not provide an instantaneous flow rate. **No statistics
+   available** in this optional dropdown is expected when you have no separate
+   flow-rate sensor; it does not prevent saving water consumption.
+5. Select **Do not track costs**, as shown in the configuration screenshot. You
+   can configure costs separately later if you have a price or cost source.
+6. Select **Save**.
+7. Open **Energy** in the sidebar and select the **Water** tab. Use the date
+   controls to view daily or monthly consumption, including imported history.
+   Allow the dashboard to refresh after the initial statistics import.
+
+Choose the **WaterSmart statistic** in the consumption selector. The live entity
+`sensor.watersmart_<account_number>_water_usage_hourly` displays the latest hourly
+reading and is not a cumulative consumption sensor, so it is not offered as an
+Energy consumption source. Its normal History starts when the integration is
+installed; the imported statistic supplies earlier consumption to Energy.
+
+If the **Water consumption** selector has no WaterSmart entry:
+
+- Check **Settings → Devices & services → WaterSmart** for setup or authentication
+  errors and confirm that the first download succeeded.
+- Open **Developer tools → States**, find your hourly sensor, and check that
+  `cached_hours` is greater than zero and `historical_statistic_id` is present.
+- Open **Developer tools → Statistics** and look for that statistic ID. If it
+  remains missing, check **Settings → System → Logs** for WaterSmart or recorder
+  errors. Home Assistant's recorder integration must be enabled to import history.
+
+See [Home Assistant's water usage documentation](https://www.home-assistant.io/docs/energy/water/)
+for more about water consumption in the Energy dashboard.
 
 ## Sensor and history
 
@@ -115,11 +176,11 @@ and [sensor semantics](https://developers.home-assistant.io/docs/core/entity/sen
 
 ## Releases
 
-The [Release workflow](.github/workflows/release.yml) follows the
-[Kia Uvo release workflow](https://github.com/Hyundai-Kia-Connect/kia_uvo/blob/master/.github/workflows/release.yml)
-pattern: semantic versions, conventional commit release notes, and GitHub releases.
-It runs on pushes to `main`, manually from GitHub Actions, and weekly on Sunday
-at 08:00 UTC. It publishes only when releasable changes exist. The first release
+The [Release workflow](.github/workflows/release.yml) uses semantic versions,
+conventional commit release notes, and GitHub releases.
+It runs manually from GitHub Actions. Automatic releases on pushes and weekly
+runs are disabled until release versioning is requested. It publishes only when
+releasable changes exist. The first release
 uses the existing `0.1.0` version; subsequent releases are calculated from commits:
 
 - `fix: ...` creates a patch release.

@@ -17,6 +17,7 @@ from yarl import URL
 
 LOGIN_PATH = "/index.php/welcome/login"
 HOME_PATH = "/index.php/home/index"
+USAGE_PATH = "/index.php/trackUsage"
 CHART_PATH = "/index.php/rest/v1/Chart/RealTimeChart"
 
 
@@ -30,6 +31,10 @@ class AuthenticationError(WaterSmartError):
 
 class AccountMismatchError(WaterSmartError):
     """The selected portal account changed."""
+
+
+class AccountNotFoundError(WaterSmartError):
+    """The page has no labeled active account number."""
 
 
 def normalize_url(value: str) -> str:
@@ -63,21 +68,77 @@ class LoginParser(HTMLParser):
         if tag == "input":
             if attributes.get("name") == "token":
                 self.token = attributes.get("value") or ""
-            if attributes.get("name") == "password":
+            if (
+                attributes.get("name") == "password"
+                or attributes.get("type") == "password"
+            ):
                 self.is_login = True
 
 
+class AccountParser(HTMLParser):
+    """Collect rendered text without depending on the portal's tag layout."""
+
+    _VOID_TAGS = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, bool]] = []
+        self.parts: list[str] = []
+        self.navigation: list[str] = []
+        self.has_navigation = False
+
+    def handle_starttag(self, tag, attrs) -> None:
+        navigation = dict(attrs).get("id") == "account-navigation"
+        self.has_navigation |= navigation
+        if tag not in self._VOID_TAGS:
+            self.stack.append((tag, navigation))
+
+    def handle_endtag(self, tag) -> None:
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                break
+
+    def handle_data(self, data) -> None:
+        if any(tag in {"script", "style"} for tag, _ in self.stack):
+            return
+        self.parts.append(data)
+        if any(navigation for _, navigation in self.stack):
+            self.navigation.append(data)
+
+
 def account_from_html(html: str) -> str:
-    """Extract the active account from the navigation shown in the HAR."""
-    match = re.search(
-        r"id=[\'\"]account-navigation[\'\"].*?Account Number\s*</div>"
-        r"\s*<div>\s*<var>\s*([^<]+)\s*</var>",
-        html,
-        re.DOTALL | re.IGNORECASE,
+    """Read a labeled account number, rejecting missing or ambiguous identity."""
+    parser = AccountParser()
+    parser.feed(html)
+    parts = parser.navigation if parser.has_navigation else parser.parts
+    text = " ".join(" ".join(parts).split())
+    candidates = re.findall(
+        r"\bAccount\s+(?:Number|No\.?|#)\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9._-]*)",
+        text,
+        re.IGNORECASE,
     )
-    if not match:
-        raise WaterSmartError("The portal did not identify its active account")
-    return match[1].strip()
+    accounts = {value for value in candidates if any(c.isdigit() for c in value)}
+    if not accounts:
+        raise AccountNotFoundError("The portal did not identify its active account")
+    if len(accounts) != 1:
+        raise WaterSmartError("The portal identified multiple active accounts")
+    return accounts.pop()
 
 
 def parse_chart(payload: object) -> dict[int, float]:
@@ -129,7 +190,15 @@ class WaterSmartClient:
         self.email = email
         self.password = password
         self.account_number: str | None = None
+        self._authenticated = False
         self._lock = asyncio.Lock()
+
+    async def _active_account(self, html: str) -> str:
+        """Use the usage page when the landing page omits account navigation."""
+        try:
+            return account_from_html(html)
+        except AccountNotFoundError:
+            return account_from_html(await self._request("GET", USAGE_PATH))
 
     async def _request(self, method: str, path: str, **kwargs) -> str:
         """Follow only same-origin redirects and keep errors free of secrets."""
@@ -166,6 +235,7 @@ class WaterSmartClient:
         raise WaterSmartError("Too many portal redirects")
 
     async def _login(self) -> str:
+        self._authenticated = False
         self.session.cookie_jar.clear()
         login_page = await self._request("GET", LOGIN_PATH)
         parser = LoginParser()
@@ -188,11 +258,12 @@ class WaterSmartClient:
         # Some portals redirect to a landing page without navigation.
         try:
             account = account_from_html(html)
-        except WaterSmartError:
-            account = account_from_html(await self._request("GET", HOME_PATH))
+        except AccountNotFoundError:
+            account = await self._active_account(await self._request("GET", HOME_PATH))
         if self.account_number is not None and account != self.account_number:
             raise AccountMismatchError("The active WaterSmart account changed")
         self.account_number = account
+        self._authenticated = True
         return account
 
     async def login(self) -> str:
@@ -202,12 +273,13 @@ class WaterSmartClient:
     async def fetch_hourly(self) -> dict[int, float]:
         """Retry an expired session once, using stored credentials."""
         async with self._lock:
-            if self.account_number is None:
+            # A stored account number identifies the entry, not a logged-in session.
+            if not self._authenticated:
                 await self._login()
             for attempt in range(2):
                 try:
                     html = await self._request("GET", HOME_PATH)
-                    if account_from_html(html) != self.account_number:
+                    if await self._active_account(html) != self.account_number:
                         raise AccountMismatchError(
                             "The active WaterSmart account changed"
                         )
@@ -224,6 +296,7 @@ class WaterSmartClient:
                         ) from err
                     return parse_chart(payload)
                 except AuthenticationError:
+                    self._authenticated = False
                     if attempt:
                         raise
                     await self._login()
