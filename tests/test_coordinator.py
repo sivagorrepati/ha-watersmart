@@ -1,11 +1,13 @@
 """Verify cache restoration, historical correction and failure behavior."""
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -26,6 +28,7 @@ async def coordinator(tmp_path):
         entry_id="test_entry",
         data={"account_number": "0012345"},
         async_on_unload=Mock(),
+        state=ConfigEntryState.SETUP_IN_PROGRESS,
     )
     client = SimpleNamespace(
         url="https://milpitas.watersmart.com",
@@ -36,11 +39,7 @@ async def coordinator(tmp_path):
     result.store = SimpleNamespace(
         async_load=AsyncMock(return_value=None), async_save=AsyncMock()
     )
-    recorder = Mock(async_block_till_done=AsyncMock())
-    with patch(
-        "custom_components.watersmart.coordinator.get_instance", return_value=recorder
-    ):
-        yield result
+    return result
 
 
 async def test_cache_restart_and_sensor_naming(coordinator):
@@ -55,7 +54,7 @@ async def test_cache_restart_and_sensor_naming(coordinator):
     ) as add:
         coordinator.data = await coordinator._async_update_data()
     assert coordinator.history == {0: 1.0, 3600: 2.0, 7200: 3.0}
-    assert [r["sum"] for r in add.call_args.args[2]] == [1, 3, 6]
+    assert [r["sum"] for r in add.call_args.args[2]] == [3, 6]
     cached = coordinator.store.async_save.call_args.args[0]
     assert cached["last_hour"] == 7200
     assert cached["hours"]["0"] == 1.0
@@ -126,7 +125,7 @@ async def test_current_hour_not_published_as_final(coordinator):
     assert data == {current_hour - 3600: 4.0}
 
 
-async def test_legacy_cache_is_shifted_and_statistics_rebuilt(coordinator):
+async def test_legacy_cache_preserved_and_only_new_readings_imported(coordinator):
     coordinator.timezone = ZoneInfo("America/Los_Angeles")
     raw = int(datetime(2026, 7, 1, tzinfo=UTC).timestamp())
     coordinator.store.async_load.return_value = {
@@ -134,39 +133,34 @@ async def test_legacy_cache_is_shifted_and_statistics_rebuilt(coordinator):
         "hours": {str(raw): 2.0},
         "last_download": "2026-07-02T00:00:00+00:00",
     }
-    coordinator.client.fetch_hourly.return_value = {raw + 3600: 3.0}
+    coordinator.client.fetch_hourly.return_value = {raw: 99, raw + 3600: 3}
     await coordinator._async_setup()
-    assert coordinator.history == {raw + 7 * 3600: 2.0}
+    assert coordinator.history == {raw: 2}
     assert coordinator.last_download == "2026-07-02T00:00:00+00:00"
-    events = []
-    recorder = Mock(async_block_till_done=AsyncMock())
-    recorder.async_clear_statistics.side_effect = lambda ids: events.append("clear")
-    with (
-        patch(
-            "custom_components.watersmart.coordinator.get_instance",
-            return_value=recorder,
-        ),
-        patch(
-            "custom_components.watersmart.coordinator.async_add_external_statistics",
-            side_effect=lambda *args: events.append("import"),
-        ) as add,
-    ):
+    with patch(
+        "custom_components.watersmart.coordinator.async_add_external_statistics"
+    ) as add:
         coordinator.data = await coordinator._async_update_data()
-        assert events == ["clear", "import"]
-        recorder.async_clear_statistics.assert_called_once_with(
-            [coordinator.statistic_id]
-        )
-        recorder.async_block_till_done.assert_awaited_once()
-        assert add.call_args.args[2][0]["start"] == datetime(2026, 7, 1, 7, tzinfo=UTC)
+        assert coordinator.history == {raw: 2, raw + 8 * 3600: 3}
+        rows = add.call_args.args[2]
+        assert len(rows) == 1
+        assert rows[0]["start"] == datetime(2026, 7, 1, 8, tzinfo=UTC)
+        assert rows[0]["sum"] == 5
         await coordinator._async_update_data()
-        assert recorder.async_clear_statistics.call_count == 1
+        assert add.call_count == 1
+        # The preservation boundary survives restart and permits future corrections.
+        cached = coordinator.store.async_save.call_args.args[0]
+        coordinator.store.async_load.return_value = cached
+        await coordinator._async_setup()
+        coordinator.client.fetch_hourly.return_value = {raw: 100, raw + 3600: 4}
+        await coordinator._async_update_data()
+        assert coordinator.history == {raw: 2, raw + 8 * 3600: 4}
+        assert add.call_args.args[2][0]["sum"] == 6
     cached = coordinator.store.async_save.call_args.args[0]
-    assert cached["raw_hours"] == {str(raw): 2.0, str(raw + 3600): 3.0}
+    assert cached["raw_hours"] == {str(raw + 3600): 4}
+    assert cached["preserve_history_through"] == raw
+    assert cached["preserve_raw_through"] == raw
     assert cached["timezone"] == "America/Los_Angeles"
-    assert cached["timestamp_mode"] == "local_wall_time"
-    assert sum(coordinator.history.values()) == 5
-    sensor = WaterSmartHourlySensor(coordinator)
-    assert sensor.extra_state_attributes["reading_start"] == "2026-07-01T08:00:00+00:00"
 
 
 async def test_local_cache_is_not_converted_twice(coordinator):
@@ -181,10 +175,11 @@ async def test_local_cache_is_not_converted_twice(coordinator):
     }
     await coordinator._async_setup()
     assert coordinator.history == {raw + 8 * 3600: 2}
-    assert not coordinator._reset_statistics
+    assert coordinator._preserve_through == raw + 8 * 3600
 
 
-async def test_timezone_change_reuses_raw_cache(coordinator):
+@pytest.mark.parametrize("saved_boundary", [False, True])
+async def test_timezone_change_preserves_existing_cache(coordinator, saved_boundary):
     coordinator.timezone = ZoneInfo("America/New_York")
     raw = int(datetime(2026, 1, 1, tzinfo=UTC).timestamp())
     coordinator.store.async_load.return_value = {
@@ -194,9 +189,20 @@ async def test_timezone_change_reuses_raw_cache(coordinator):
         "timestamp_mode": "local_wall_time",
         "timezone": "America/Los_Angeles",
     }
+    if saved_boundary:
+        coordinator.store.async_load.return_value.update(
+            preserve_history_through=None, preserve_raw_through=None
+        )
     await coordinator._async_setup()
-    assert coordinator.history == {raw + 5 * 3600: 2}
-    assert coordinator._reset_statistics
+    assert coordinator.history == {raw + 8 * 3600: 2}
+    assert coordinator._preserve_raw_through == raw
+    coordinator.client.fetch_hourly.return_value = {raw: 99, raw + 4 * 3600: 3}
+    with patch(
+        "custom_components.watersmart.coordinator.async_add_external_statistics"
+    ) as add:
+        await coordinator._async_update_data()
+    assert coordinator.history == {raw + 8 * 3600: 2, raw + 9 * 3600: 3}
+    assert len(add.call_args.args[2]) == 1
 
 
 async def test_current_local_hour_not_published(coordinator):
@@ -225,23 +231,37 @@ async def test_fractional_timezone_waits_for_full_hour(coordinator):
     assert data == {int(now.replace(minute=0).timestamp()) - 3600: 4}
 
 
-async def test_failed_migration_does_not_save_completion_marker(coordinator):
-    coordinator._reset_statistics = True
+async def test_setup_preserves_existing_data_without_waiting_for_recorder(coordinator):
+    coordinator.store.async_load.return_value = {
+        "account_number": "0012345",
+        "hours": {"3600": 2.0},
+        "statistics_rebuild_pending": True,
+    }
+    coordinator.client.fetch_hourly.return_value = {3600: 99}
+    future = coordinator.hass.loop.create_future()
     recorder = Mock(
-        async_block_till_done=AsyncMock(side_effect=RuntimeError("recorder failed"))
+        async_block_till_done=AsyncMock(side_effect=lambda: future),
+        async_get_commit_future=Mock(return_value=future),
     )
     with (
         patch(
-            "custom_components.watersmart.coordinator.get_instance",
-            return_value=recorder,
-        ),
-        patch("custom_components.watersmart.coordinator.async_add_external_statistics"),
-        pytest.raises(RuntimeError, match="recorder failed"),
+            "homeassistant.components.recorder.get_instance", return_value=recorder
+        ) as get,
+        patch(
+            "custom_components.watersmart.coordinator.async_add_external_statistics"
+        ) as add,
     ):
-        await coordinator._async_update_data()
-    coordinator.store.async_save.assert_not_awaited()
-    assert coordinator._reset_statistics
-    assert coordinator.last_download is None
+        await asyncio.wait_for(
+            coordinator.async_config_entry_first_refresh(), timeout=1
+        )
+        assert coordinator.last_update_success
+        assert coordinator.data == {3600: 2}
+        assert not future.done()
+        get.assert_not_called()
+        add.assert_not_called()
+        cached = coordinator.store.async_save.call_args.args[0]
+        assert "statistics_rebuild_pending" not in cached
+        assert cached["hours"] == {"3600": 2}
 
 
 async def test_repeated_hour_total_survives_polling_and_restart(coordinator):

@@ -1,8 +1,9 @@
 # WaterSmart for Home Assistant
 
-A custom integration built from the Milpitas WaterSmart HAR. It logs in with
-email/password, downloads `RealTimeChart` history, and polls every 30 minutes.
-The active account number is discovered from the portal.
+Track your WaterSmart water usage in Home Assistant. Sign in with your utility
+portal email and password to view hourly consumption and available historical
+usage in the Energy dashboard. The integration checks for updates every 30 minutes
+and discovers your active account automatically.
 
 ## Install
 
@@ -30,7 +31,8 @@ for details about adding a GitHub repository.
 
 Download `watersmart.zip` from the
 [latest release](https://github.com/sivagorrepati/ha-watersmart/releases/latest)
-and extract it into your Home Assistant configuration directory. Alternatively:
+and extract it into your Home Assistant configuration directory. Restart Home
+Assistant, then follow **Configure WaterSmart** below. Alternatively:
 
 1. Copy `custom_components/watersmart` into your Home Assistant configuration
    directory under `custom_components/watersmart`.
@@ -38,6 +40,9 @@ and extract it into your Home Assistant configuration directory. Alternatively:
 3. Follow **Configure WaterSmart** below.
 
 ## Configure WaterSmart
+
+Before setup, make sure Home Assistant's configured timezone matches your water
+utility's timezone. For Milpitas, use `America/Los_Angeles`.
 
 1. Open **Settings → Devices & services → Add integration**.
 2. Search for and select **WaterSmart**.
@@ -64,7 +69,7 @@ configured timezone.
    in gallons and does not provide an instantaneous flow rate. **No statistics
    available** in this optional dropdown is expected when you have no separate
    flow-rate sensor; it does not prevent saving water consumption.
-5. Select **Do not track costs**, as shown in the configuration screenshot. You
+5. Select **Do not track costs**. You
    can configure costs separately later if you have a price or cost source.
 6. Select **Save**.
 7. Open **Energy** in the sidebar and select the **Water** tab. Use the date
@@ -82,7 +87,7 @@ If the **Water consumption** selector has no WaterSmart entry:
 - Check **Settings → Devices & services → WaterSmart** for setup or authentication
   errors and confirm that the first download succeeded.
 - Open **Developer tools → States**, find your hourly sensor, and check that
-  `cached_hours` is greater than zero and `historical_statistic_id` is present.
+  it has a numeric value and a `historical_statistic_id` attribute.
 - Open **Developer tools → Statistics** and look for that statistic ID. If it
   remains missing, check **Settings → System → Logs** for WaterSmart or recorder
   errors. Home Assistant's recorder integration must be enabled to import history.
@@ -98,56 +103,33 @@ The sensor is created as:
 sensor.watersmart_<account_number>_water_usage_hourly
 ```
 
-Its state is **gallons for the latest completed hour returned by the utility**,
-not necessarily the previous wall-clock hour. `reading_start` is that reading's
-UTC timestamp after interpreting the API's encoded date and hour as local wall
-time in Home Assistant's configured timezone. Set that timezone to match your
-utility's timezone. For example, an encoded October 1, 2026 midnight reading in
-`America/Los_Angeles` is stored as October 1 at 07:00 UTC, preserving local midnight
-in charts. `last_download` remains the actual download time in UTC.
-Additional attributes expose `last_download`, `cached_hours`, and
-`historical_statistic_id`. Home Assistant preserves an existing entity registry
-name; name collisions get the usual suffix. Account numbers are normalized to
-valid entity IDs, preserving leading zeros.
+The sensor shows **gallons used during the latest completed hour available from
+WaterSmart**. Your utility may publish readings with a delay, so this is not always
+the previous hour. The integration treats reading dates and hours as local time
+in Home Assistant's configured timezone.
 
-Raw encoded hours, converted UTC hours, the timezone, the last hour, and the
-last successful download time are
-persisted in `.storage/watersmart.<entry_id>.hourly`. Older data remains cached
-when the API's history window rolls forward. Repeated timestamps within a response
-are summed into the same hour. Later downloads replace that hour's total rather
-than accumulating it again; revised readings replace earlier values. Missing
-readings remain unknown.
-The API capture demonstrates a full-history request; unsupported incremental
-query parameters are not invented. Each poll fetches the history and merges it.
+To check when data was recorded or downloaded, open **Developer tools → States**
+and select your hourly sensor:
 
-On the first successful update after changing to local timestamp interpretation,
-the integration converts legacy cached readings, clears its existing WaterSmart
-statistic, and reimports the retained history at corrected times. Raw hours are
-kept so they are not shifted again on restart. Changing Home Assistant's timezone
-and reloading the integration also rebuilds this statistic from raw hours.
+| Attribute | Meaning |
+|---|---|
+| `reading_start` | Start of the water usage hour, shown as a UTC timestamp. |
+| `last_download` | Time of the last successful download, shown in UTC. |
+| `historical_statistic_id` | Statistic to use for historical charts and the Energy dashboard. |
 
-Repeated fall-back readings are combined into one hourly total, assigned to the
-first occurrence of that local hour. This preserves volume without creating two
-separate hourly entries. If the API
-includes a nonexistent spring-forward hour, its volume is combined with the next
-valid hour rather than lost. These transition hours cannot be reconstructed more
-precisely from the encoded timestamps alone. Recorder statistics use whole UTC
-hour buckets; fractional-offset timezones place readings in the containing bucket.
-
-Historical readings are also imported into recorder's long-term statistics as:
+Available historical readings are imported under this statistic ID:
 
 ```text
 watersmart:<account_number>_water_usage_hourly
 ```
 
-Home Assistant cannot backdate live sensor states through its entity API, so the
-sensor's normal History begins at installation; the imported statistic supplies
-earlier hourly history. It stores cumulative gallons and supports hourly `change`
-charts. Only new or corrected hours and affected later sums are imported during
-normal polling. On restart, cached history is reimported idempotently so an
-interrupted recorder write can recover. The live hourly sensor intentionally has
-no `state_class`: a declining interval volume is not a cumulative meter, and
-polling delayed readings should not produce misleading water totals.
+Use this statistic to view earlier consumption. The sensor's normal **History**
+starts when you install the integration. Select the statistic in the Energy
+water consumption selector, as described above.
+
+Missing readings remain unknown. During daylight-saving fall-back, repeated
+readings for the same local hour are combined into one hourly total. During
+spring-forward, the skipped hour remains absent.
 
 Example dashboard card (replace `1234567` with your account number):
 
@@ -165,23 +147,20 @@ entities:
 
 ## Authentication and failures
 
-Each entry has its own in-memory cookie jar. Login fetches the hidden form token
-and posts `token`, `email`, and `password` with `forceEmail=1`, matching the capture.
-On an expired session it logs in again automatically and retries once. Rejected
-credentials trigger Home Assistant's reauthentication dialog. Reauthentication
-must resolve to the same portal account. Network/service failures mark the sensor
-unavailable and are retried; the disk cache is retained. Initial setup requires a
-successful online fetch, even if a cache exists.
+The integration renews expired login sessions automatically. If your credentials
+are rejected, open **Settings → Devices & services → WaterSmart** and follow the
+reauthentication prompt. Use credentials for the same utility account.
 
-Credentials are stored by Home Assistant in its config entry and never written
-to the hourly cache. HTTPS certificate checks remain enabled and redirects must
-stay within the utility portal. The integration does not ship the HAR or reuse
-captured cookies. Treat the original HAR as sensitive.
+If WaterSmart cannot be reached, the sensor becomes unavailable and the integration
+retries. `last_download` continues to show the last successful download. Initial
+setup requires a working portal connection.
 
-The capture covers one active account and does not establish a multi-account
-switch API, MFA, or CAPTCHA handling. Those workflows are not supported. Different
-utility portals may have different markup. No live login is performed during
-development tests.
+Home Assistant stores your login credentials in its integration configuration.
+No HAR file or captured login session is needed for installation.
+
+The integration supports one active account per entry. MFA, CAPTCHA, and switching
+between accounts within a portal are not supported. It was developed for the
+Milpitas portal; other WaterSmart utility portals may behave differently.
 
 ## Development
 
