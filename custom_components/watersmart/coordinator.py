@@ -4,7 +4,6 @@ import logging
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticMeanType
 from homeassistant.components.recorder.statistics import async_add_external_statistics
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -40,24 +39,41 @@ class WaterSmartCoordinator(DataUpdateCoordinator[dict[int, float]]):
         self.raw_history: dict[int, float] = {}
         self.last_download: str | None = None
         self._reimport = True
-        self._reset_statistics = False
+        self._preserve_through: int | None = None
+        self._preserve_raw_through: int | None = None
         self.timezone = ZoneInfo(hass.config.time_zone)
 
     async def _async_setup(self) -> None:
         cached = await self.store.async_load()
         if cached and cached.get("account_number") == self.account_number:
-            # Older caches stored the encoded API hours directly as UTC epochs.
+            # Retain stored timestamps exactly; existing history is not migrated.
+            self.history = {int(t): float(v) for t, v in cached["hours"].items()}
             self.raw_history = {
-                int(t): float(v)
-                for t, v in cached.get("raw_hours", cached["hours"]).items()
+                int(t): float(v) for t, v in cached.get("raw_hours", {}).items()
             }
-            self.history = await self.hass.async_add_executor_job(
-                localize_history, self.raw_history, self.timezone
+            self._preserve_through = cached.get(
+                "preserve_history_through", max(self.history, default=None)
             )
-            self._reset_statistics = (
-                cached.get("timestamp_mode") != "local_wall_time"
-                or cached.get("timezone") != self.timezone.key
+            self._preserve_raw_through = cached.get("preserve_raw_through")
+            timezone_changed = (
+                cached.get("timezone") is not None
+                and cached["timezone"] != self.timezone.key
             )
+            if timezone_changed and self.history:
+                self._preserve_through = max(self.history)
+            if self.history and (
+                "preserve_raw_through" not in cached or timezone_changed
+            ):
+                if cached.get("timestamp_mode") == "local_wall_time":
+                    # Use the timezone recorded when this cache was created.
+                    old_timezone = ZoneInfo(cached.get("timezone", self.timezone.key))
+                    last_local = datetime.fromtimestamp(max(self.history), old_timezone)
+                    self._preserve_raw_through = int(
+                        last_local.replace(tzinfo=UTC).timestamp()
+                    )
+                else:
+                    self._preserve_raw_through = max(self.history)
+            self._reimport = not bool(self.history)
             self.last_download = cached.get("last_download")
 
     async def _async_update_data(self) -> dict[int, float]:
@@ -70,11 +86,21 @@ class WaterSmartCoordinator(DataUpdateCoordinator[dict[int, float]]):
         # Incomplete/current hours are not final usage values.
         cutoff = int(datetime.now(UTC).timestamp()) - 3600
         raw, _ = merge_history(self.raw_history, downloaded)
-        raw = {t: v for t, v in raw.items() if local_hour(t, self.timezone) <= cutoff}
-        merged = await self.hass.async_add_executor_job(
+        raw = {
+            t: v
+            for t, v in raw.items()
+            if local_hour(t, self.timezone) <= cutoff
+            and (self._preserve_raw_through is None or t > self._preserve_raw_through)
+        }
+        converted = await self.hass.async_add_executor_job(
             localize_history, raw, self.timezone
         )
-        _, changed = merge_history(self.history, merged)
+        converted = {
+            t: v
+            for t, v in converted.items()
+            if self._preserve_through is None or t > self._preserve_through
+        }
+        merged, changed = merge_history(self.history, converted)
         if not merged:
             raise UpdateFailed("No completed hourly readings are available")
         since = min(merged) if self._reimport else changed
@@ -82,8 +108,6 @@ class WaterSmartCoordinator(DataUpdateCoordinator[dict[int, float]]):
             rows = await self.hass.async_add_executor_job(
                 statistics_rows, merged, since
             )
-            if self._reset_statistics:
-                get_instance(self.hass).async_clear_statistics([self.statistic_id])
             async_add_external_statistics(
                 self.hass,
                 {
@@ -97,9 +121,6 @@ class WaterSmartCoordinator(DataUpdateCoordinator[dict[int, float]]):
                 },
                 rows,
             )
-            if self._reset_statistics:
-                # Complete the queued replacement before saving the migration marker.
-                await get_instance(self.hass).async_block_till_done()
         last_download = datetime.now(UTC).isoformat()
         await self.store.async_save(
             {
@@ -108,6 +129,8 @@ class WaterSmartCoordinator(DataUpdateCoordinator[dict[int, float]]):
                 "raw_hours": {str(t): v for t, v in raw.items()},
                 "timestamp_mode": "local_wall_time",
                 "timezone": self.timezone.key,
+                "preserve_history_through": self._preserve_through,
+                "preserve_raw_through": self._preserve_raw_through,
                 "last_download": last_download,
                 "last_hour": max(merged),
             }
@@ -116,5 +139,4 @@ class WaterSmartCoordinator(DataUpdateCoordinator[dict[int, float]]):
         self.raw_history = raw
         self.last_download = last_download
         self._reimport = False
-        self._reset_statistics = False
         return merged
