@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * 0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: watersmart-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # A release always runs against main, including manual runs.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Validate before publishing
+        run: |
+          python -m pip install -e '.[test]'
+          ruff check .
+          ruff format --check .
+          python -m pytest -q
+      - name: Check for an existing release tag
+        id: existing
+        run: |
+          if git tag --list 'v[0-9]*' | grep -q .; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Calculate semantic version and release notes
+        if: steps.existing.outputs.found == 'true'
+        id: semantic
+        uses: jossef/action-semantic-release-info@277fc891fc5ac40ed0e8d6bf59a0e24a25dfdeac # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Select release version
+        id: release
+        env:
+          HAS_RELEASE: ${{ steps.existing.outputs.found }}
+          NEXT_VERSION: ${{ steps.semantic.outputs.version }}
+          RELEASE_NOTES: ${{ steps.semantic.outputs.notes }}
+        run: |
+          python scripts/prepare_release.py
+      - name: Update version and create tag
+        if: steps.release.outputs.version != ''
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          python scripts/build_release.py --version "$RELEASE_VERSION" --output dist/watersmart.zip
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add custom_components/watersmart/manifest.json pyproject.toml
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): v$RELEASE_VERSION"
+          fi
+          git tag -a "v$RELEASE_VERSION" -m "WaterSmart v$RELEASE_VERSION"
+          git push --atomic origin HEAD:main "refs/tags/v$RELEASE_VERSION"
+      - name: Publish release and installation ZIP
+        if: steps.release.outputs.version != ''
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
+        with:
+          tag: v${{ steps.release.outputs.version }}
+          name: v${{ steps.release.outputs.version }}
+          bodyFile: dist/release-notes.md
+          artifacts: dist/watersmart.zip
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          draft: false
+          prerelease: false

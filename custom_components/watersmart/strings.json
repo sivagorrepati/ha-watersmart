@@ -1,0 +1,36 @@
+{
+  "title": "WaterSmart",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to WaterSmart",
+        "description": "Sign in to your utility WaterSmart portal. The active account is detected automatically.",
+        "data": {
+          "url": "Utility portal URL",
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate WaterSmart",
+        "description": "Enter your updated credentials for the same WaterSmart account.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "cannot_connect": "Cannot connect to WaterSmart. Try again later.",
+      "invalid_url": "Enter an HTTPS utility URL such as https://milpitas.watersmart.com.",
+      "invalid_response": "The portal did not return a valid account and hourly data.",
+      "account_mismatch": "The active portal account does not match this integration."
+    },
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "reauth_successful": "Reauthentication was successful.",
+      "unique_id_mismatch": "Sign in to the same WaterSmart account originally configured."
+    }
+  }
+}
