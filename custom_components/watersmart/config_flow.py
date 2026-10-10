@@ -36,12 +36,13 @@ class WaterSmartConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         data = dict(data)
         data[CONF_URL] = normalize_url(data[CONF_URL])
         data[CONF_EMAIL] = data[CONF_EMAIL].strip()
-        client = create_client(self.hass, data)
+        # This temporary session is released here rather than on HA shutdown.
+        client = create_client(self.hass, data, auto_cleanup=False)
         try:
             data[CONF_ACCOUNT_NUMBER] = await client.login()
             await client.fetch_hourly()
         finally:
-            await client.session.close()
+            client.session.detach()
         return data
 
     async def async_step_user(self, user_input=None):

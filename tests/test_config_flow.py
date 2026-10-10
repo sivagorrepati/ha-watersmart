@@ -26,12 +26,12 @@ def test_credentials_form_accepts_inputs_and_defaults():
     }
 
 
-async def test_validation_closes_session_on_error():
+async def test_validation_detaches_session_on_error():
     flow = WaterSmartConfigFlow()
     flow.hass = Mock()
     client = SimpleNamespace(
         login=AsyncMock(side_effect=AuthenticationError()),
-        session=SimpleNamespace(close=AsyncMock()),
+        session=SimpleNamespace(detach=Mock(), close=AsyncMock()),
     )
     with patch(
         "custom_components.watersmart.config_flow.create_client", return_value=client
@@ -42,7 +42,8 @@ async def test_validation_closes_session_on_error():
             pass
         else:
             raise AssertionError("Authentication failure was swallowed")
-    client.session.close.assert_awaited_once()
+    client.session.detach.assert_called_once()
+    client.session.close.assert_not_awaited()
 
 
 async def test_setup_discovers_account_and_creates_entry():

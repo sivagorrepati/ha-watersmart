@@ -11,6 +11,7 @@ from custom_components.watersmart.api import (
     CHART_PATH,
     HOME_PATH,
     LOGIN_PATH,
+    USAGE_PATH,
     AccountMismatchError,
     AuthenticationError,
     LoginParser,
@@ -34,6 +35,34 @@ def test_login_token_and_account():
     assert parser.token == "fresh-token"
     assert parser.is_login
     assert account_from_html(HOME) == "0012345"
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        '<section id="account-navigation"><b>Account&nbsp;Number</b>'
+        '<div class="value"><var data-id="account"><span>0012345</span></var></div>'
+        "</section>",
+        '<div id="account-navigation"><span>Account Number:</span>'
+        '<span class="value">0012345</span></div>',
+        "<main><p>Account Number</p><p>0012345</p></main>",
+    ],
+)
+def test_account_parser_accepts_layout_variations(html):
+    assert account_from_html(html) == "0012345"
+
+
+def test_account_parser_rejects_ambiguous_identity():
+    with pytest.raises(WaterSmartError, match="multiple"):
+        account_from_html("<main>Account Number 0012345 Account Number 9999999</main>")
+
+
+def test_account_parser_does_not_use_form_labels_or_script_text():
+    with pytest.raises(WaterSmartError, match="did not identify"):
+        account_from_html(
+            "<script>Account Number 9999999</script>"
+            "<label>Account number</label><label>Zip code</label>"
+        )
 
 
 @pytest.mark.parametrize(
@@ -99,12 +128,59 @@ async def test_login_uses_fresh_token_and_cookie_session():
         assert kwargs["params"] == {"forceEmail": "1"}
 
 
+async def test_configured_account_logs_in_before_fetching():
+    async with aiohttp.ClientSession() as session:
+        client = WaterSmartClient(session, "https://milpitas.watersmart.com", "e", "p")
+        client.account_number = "0012345"
+        client._request = AsyncMock(side_effect=[LOGIN, HOME, HOME, json.dumps(CHART)])
+        assert await client.fetch_hourly() == {3600: 2.5}
+        assert client._request.call_args_list[0].args == ("GET", LOGIN_PATH)
+        assert client._request.call_args_list[1].args == ("POST", LOGIN_PATH)
+        assert client._authenticated
+
+
+async def test_account_navigation_falls_back_to_usage_page():
+    landing = "<main>Welcome to your water portal</main>"
+    async with aiohttp.ClientSession() as session:
+        client = WaterSmartClient(session, "https://milpitas.watersmart.com", "e", "p")
+        client.account_number = "0012345"
+        client._request = AsyncMock(
+            side_effect=[
+                LOGIN,
+                landing,
+                landing,
+                HOME,
+                landing,
+                HOME,
+                json.dumps(CHART),
+            ]
+        )
+        assert await client.fetch_hourly() == {3600: 2.5}
+        usage_calls = [
+            call
+            for call in client._request.call_args_list
+            if call.args == ("GET", USAGE_PATH)
+        ]
+        assert len(usage_calls) == 2
+
+
+async def test_initial_login_rejects_different_configured_account():
+    async with aiohttp.ClientSession() as session:
+        client = WaterSmartClient(session, "https://milpitas.watersmart.com", "e", "p")
+        client.account_number = "9999999"
+        client._request = AsyncMock(side_effect=[LOGIN, HOME])
+        with pytest.raises(AccountMismatchError):
+            await client.fetch_hourly()
+        assert not client._authenticated
+
+
 async def test_expired_session_relogs_once():
     async with aiohttp.ClientSession() as session:
         client = WaterSmartClient(
             session, "https://milpitas.watersmart.com", "a@b.c", "p"
         )
         client.account_number = "0012345"
+        client._authenticated = True
         client._request = AsyncMock(
             side_effect=[
                 HOME,
@@ -136,6 +212,7 @@ async def test_changed_active_account_does_not_mix_history():
             session, "https://milpitas.watersmart.com", "a@b.c", "p"
         )
         client.account_number = "other-account"
+        client._authenticated = True
         client._request = AsyncMock(return_value=HOME)
         with pytest.raises(AccountMismatchError):
             await client.fetch_hourly()

@@ -7,7 +7,11 @@
   "config_flow": true,
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "dependencies": ["recorder"],
+  "dependencies": [
+    "recorder"
+  ],
   "requirements": [],
-  "codeowners": ["@sivagorrepati"]
+  "codeowners": [
+    "@sivagorrepati"
+  ]
 }
