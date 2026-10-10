@@ -1,12 +1,13 @@
 """Check that release archives are installable and contain only intended files."""
 
 import json
+import subprocess
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 
-from scripts import build_release
+from scripts import build_release, prepare_release
 
 
 @pytest.fixture
@@ -57,3 +58,126 @@ def test_bad_release_version_does_not_mutate_project(release_project, version):
         build_release.build_release(release_project / "watersmart.zip", version)
     assert project_path.read_text() == before
     assert not Path(release_project / "watersmart.zip").exists()
+
+
+@pytest.fixture(params=["v0.1.0", "0.1.0"])
+def release_environment(release_project, monkeypatch, request):
+    monkeypatch.setattr(prepare_release, "ROOT", release_project)
+    monkeypatch.setenv("HAS_RELEASE", "true")
+    monkeypatch.setenv("NEXT_VERSION", "")
+    monkeypatch.setenv("RELEASE_NOTES", "")
+    monkeypatch.setenv("REQUESTED_VERSION", "")
+    output = release_project / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    def git(*args):
+        return subprocess.check_output(
+            ["git", *args], cwd=release_project, text=True, stderr=subprocess.STDOUT
+        )
+
+    git("init")
+    git("add", ".")
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "feat: initial integration",
+    )
+    git("tag", request.param)
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "Fix account discovery (#1)",
+    )
+    return release_project, output, git
+
+
+def test_requested_release_includes_nonconventional_commits(
+    release_environment, monkeypatch
+):
+    root, output, _ = release_environment
+    monkeypatch.setenv("REQUESTED_VERSION", "0.1.1")
+    prepare_release.main()
+    assert output.read_text() == "version=0.1.1\n"
+    notes = (root / "dist/release-notes.md").read_text()
+    assert "Fix account discovery (#1)" in notes
+    assert "initial integration" not in notes
+    assert (
+        json.loads((root / "custom_components/watersmart/manifest.json").read_text())[
+            "version"
+        ]
+        == "0.1.0"
+    )
+
+
+@pytest.mark.parametrize("version", ["bad", "0.1.0", "0.0.9", "1.2.3\nsecret"])
+def test_requested_release_rejects_invalid_or_old_versions(
+    release_environment, monkeypatch, version
+):
+    root, output, _ = release_environment
+    monkeypatch.setenv("REQUESTED_VERSION", version)
+    with pytest.raises(ValueError):
+        prepare_release.main()
+    assert not output.exists()
+    assert not (root / "dist/release-notes.md").exists()
+
+
+@pytest.mark.parametrize("tag", ["v0.1.1", "0.1.1"])
+def test_requested_release_rejects_existing_unmerged_tag(
+    release_environment, monkeypatch, tag
+):
+    _, output, git = release_environment
+    original = git("rev-parse", "HEAD").strip()
+    git("checkout", "-b", "other-release")
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "Other branch release",
+    )
+    git("tag", tag)
+    git("checkout", "--detach", original)
+    monkeypatch.setenv("REQUESTED_VERSION", "0.1.1")
+    with pytest.raises(ValueError, match="already exists"):
+        prepare_release.main()
+    assert not output.exists()
+
+
+def test_semantic_release_uses_calculated_version_and_notes(
+    release_environment, monkeypatch
+):
+    root, output, _ = release_environment
+    monkeypatch.setenv("NEXT_VERSION", "0.2.0")
+    monkeypatch.setenv("RELEASE_NOTES", "Generated release notes")
+    prepare_release.main()
+    assert output.read_text() == "version=0.2.0\n"
+    assert (root / "dist/release-notes.md").read_text() == "Generated release notes"
+
+
+def test_empty_semantic_result_does_not_prepare_release(release_environment):
+    root, output, _ = release_environment
+    prepare_release.main()
+    assert not output.exists()
+    assert not (root / "dist/release-notes.md").exists()
+
+
+def test_legacy_alias_keeps_original_commit_and_is_idempotent(release_environment):
+    _, _, git = release_environment
+    original = git("rev-parse", "HEAD~1").strip()
+    prepare_release.normalize_legacy_tags()
+    assert git("rev-parse", "0.1.0^{}").strip() == original
+    before = git("tag", "--list")
+    prepare_release.normalize_legacy_tags()
+    assert git("tag", "--list") == before

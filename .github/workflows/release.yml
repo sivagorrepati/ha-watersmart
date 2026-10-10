@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional MAJOR.MINOR.PATCH version; leave empty to use conventional commits'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -33,13 +38,14 @@ jobs:
       - name: Check for an existing release tag
         id: existing
         run: |
-          if git tag --list 'v[0-9]*' | grep -q .; then
+          python -c 'from scripts.prepare_release import normalize_legacy_tags; normalize_legacy_tags()'
+          if git tag --list '[0-9]*' | grep -q .; then
             echo "found=true" >> "$GITHUB_OUTPUT"
           else
             echo "found=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Calculate semantic version and release notes
-        if: steps.existing.outputs.found == 'true'
+        if: steps.existing.outputs.found == 'true' && inputs.version == ''
         id: semantic
         uses: jossef/action-semantic-release-info@277fc891fc5ac40ed0e8d6bf59a0e24a25dfdeac # v3.0.0
         env:
@@ -50,8 +56,9 @@ jobs:
           HAS_RELEASE: ${{ steps.existing.outputs.found }}
           NEXT_VERSION: ${{ steps.semantic.outputs.version }}
           RELEASE_NOTES: ${{ steps.semantic.outputs.notes }}
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          python scripts/prepare_release.py
+          python -m scripts.prepare_release
       - name: Update version and create tag
         if: steps.release.outputs.version != ''
         env:
@@ -62,16 +69,16 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add custom_components/watersmart/manifest.json pyproject.toml
           if ! git diff --cached --quiet; then
-            git commit -m "chore(release): v$RELEASE_VERSION"
+            git commit -m "chore(release): $RELEASE_VERSION"
           fi
-          git tag -a "v$RELEASE_VERSION" -m "WaterSmart v$RELEASE_VERSION"
-          git push --atomic origin HEAD:main "refs/tags/v$RELEASE_VERSION"
+          git tag -a "$RELEASE_VERSION" -m "WaterSmart $RELEASE_VERSION"
+          git push --atomic origin HEAD:main "refs/tags/$RELEASE_VERSION"
       - name: Publish release and installation ZIP
         if: steps.release.outputs.version != ''
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
         with:
-          tag: v${{ steps.release.outputs.version }}
-          name: v${{ steps.release.outputs.version }}
+          tag: ${{ steps.release.outputs.version }}
+          name: ${{ steps.release.outputs.version }}
           bodyFile: dist/release-notes.md
           artifacts: dist/watersmart.zip
           artifactErrorsFailBuild: true

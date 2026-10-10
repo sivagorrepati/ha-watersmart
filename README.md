@@ -178,6 +178,9 @@ and [sensor semantics](https://developers.home-assistant.io/docs/core/entity/sen
 
 The [Release workflow](.github/workflows/release.yml) uses semantic versions,
 conventional commit release notes, and GitHub releases.
+Release names and new tags use plain versions such as `0.1.1`, without a `v`
+prefix. The workflow recognizes existing prefixed tags using temporary local
+aliases in the runner; those aliases are not pushed and old releases are unchanged.
 It runs manually from GitHub Actions. Automatic releases on pushes and weekly
 runs are disabled until release versioning is requested. It publishes only when
 releasable changes exist. The first release
@@ -188,6 +191,12 @@ uses the existing `0.1.0` version; subsequent releases are calculated from commi
 - A `BREAKING CHANGE:` commit footer creates a major release.
 - `docs: ...`, `test: ...`, and `chore: ...` do not create releases on their own.
 
+When squash-merging a pull request, retain the conventional prefix in the final
+commit title, for example `fix: repair WaterSmart session cleanup`. A title such
+as `Fix WaterSmart session cleanup` does not trigger a semantic release; the
+version calculation action reports `no info regarding next release` and stops
+before ZIP creation or publication.
+
 Before publication, tests and lint must pass. The workflow keeps `manifest.json`
 and `pyproject.toml` versions aligned, commits the version bump, tags the release,
 and uploads `watersmart.zip`. The ZIP contains the integration under
@@ -195,6 +204,13 @@ and uploads `watersmart.zip`. The ZIP contains the integration under
 repository using `hacs.json`; the ZIP is for manual installation.
 
 Maintainers can run **Actions → Release → Run workflow** on `main`. The workflow
+has an optional **version** field: leave it blank for conventional commit
+versioning, or enter an explicit version such as `0.1.1` to release changes whose
+squash commit did not retain a conventional prefix. Explicit versions must be
+newer than the latest release and must not have an existing tag. This mode skips
+semantic-release calculation, generates notes from commits since the last tag,
+and runs the same validation, ZIP build, tag push, and publication steps.
+The workflow
 uses the built-in `GITHUB_TOKEN` with `contents: write`; it requires no personal
 access token. Branch rules must allow its version commit and tag push.
 
