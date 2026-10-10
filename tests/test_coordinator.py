@@ -10,7 +10,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.watersmart.api import AuthenticationError, WaterSmartError
+from custom_components.watersmart.api import (
+    AuthenticationError,
+    WaterSmartError,
+    parse_chart,
+)
 from custom_components.watersmart.coordinator import WaterSmartCoordinator
 from custom_components.watersmart.sensor import WaterSmartHourlySensor
 
@@ -238,3 +242,34 @@ async def test_failed_migration_does_not_save_completion_marker(coordinator):
     coordinator.store.async_save.assert_not_awaited()
     assert coordinator._reset_statistics
     assert coordinator.last_download is None
+
+
+async def test_repeated_hour_total_survives_polling_and_restart(coordinator):
+    coordinator.timezone = ZoneInfo("America/Los_Angeles")
+    raw = int(datetime(2025, 11, 2, 1, tzinfo=UTC).timestamp())
+    actual = raw + 7 * 3600
+    coordinator.client.fetch_hourly.return_value = parse_chart(
+        {
+            "data": {
+                "series": [
+                    {"read_datetime": raw, "gallons": 2},
+                    {"read_datetime": raw, "gallons": 3},
+                ]
+            }
+        }
+    )
+    with patch(
+        "custom_components.watersmart.coordinator.async_add_external_statistics"
+    ) as add:
+        await coordinator._async_update_data()
+        await coordinator._async_update_data()
+        assert add.call_count == 1
+        assert add.call_args.args[2][0]["sum"] == 5
+        cached = coordinator.store.async_save.call_args.args[0]
+        assert cached["raw_hours"] == {str(raw): 5}
+        assert cached["hours"] == {str(actual): 5}
+        coordinator.store.async_load.return_value = cached
+        await coordinator._async_setup()
+        await coordinator._async_update_data()
+    assert coordinator.history == {actual: 5}
+    assert coordinator.raw_history == {raw: 5}

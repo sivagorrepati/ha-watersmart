@@ -81,7 +81,7 @@ def test_reject_unsafe_portal(url):
         normalize_url(url)
 
 
-def test_chart_deduplicates_sorts_and_skips_missing():
+def test_chart_combines_repeated_hours_sorts_and_skips_missing():
     payload = {
         "data": {
             "series": [
@@ -92,7 +92,7 @@ def test_chart_deduplicates_sorts_and_skips_missing():
             ]
         }
     }
-    assert list(parse_chart(payload).items()) == [(3600, 4), (7200, 0)]
+    assert list(parse_chart(payload).items()) == [(3600, 7), (7200, 0)]
 
 
 @pytest.mark.parametrize(

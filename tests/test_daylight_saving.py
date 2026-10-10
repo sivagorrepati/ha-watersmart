@@ -56,11 +56,7 @@ def test_har_spring_forward_skips_two_am_without_missing_reading(day):
     [(0.0, 0.0), (2.0, 3.0)],
     ids=["har-zero-volumes", "nonzero-volumes"],
 )
-@pytest.mark.xfail(
-    strict=True,
-    reason="Repeated fall-back hours are collapsed by parse_chart.",
-)
-def test_har_fall_back_preserves_both_one_am_readings(first, second):
+def test_har_fall_back_combines_both_one_am_readings(first, second):
     start = int(datetime(2025, 11, 2, tzinfo=UTC).timestamp())
     # The capture repeats 01:00 with identical timestamps and no offset flags.
     # Midnight is marked missing, leaving 24 actual rows on a 25-hour day.
@@ -85,12 +81,47 @@ def test_har_fall_back_preserves_both_one_am_readings(first, second):
     first_one_am = int(datetime(2025, 11, 2, 8, tzinfo=UTC).timestamp())
     second_one_am = first_one_am + 3600
     assert first_one_am - 3600 not in converted  # Missing midnight stays unknown.
-    assert converted[first_one_am] == first
-    assert second_one_am in converted
-    assert converted[second_one_am] == second
-    assert len(converted) == 24
+    assert converted[first_one_am] == first + second
+    assert second_one_am not in converted
+    assert len(converted) == 23
     assert datetime.fromtimestamp(first_one_am, TIMEZONE).fold == 0
     assert datetime.fromtimestamp(second_one_am, TIMEZONE).fold == 1
     assert sum(converted.values()) == first + second + 22
     rows = statistics_rows(converted, min(converted))
     assert rows[-1]["sum"] == first + second + 22
+    replay, changed = merge_history(
+        converted, localize_history(parse_chart(payload), TIMEZONE)
+    )
+    assert replay == converted
+    assert changed is None
+
+
+def test_corrected_repeated_hour_replaces_previous_total():
+    timestamp = int(datetime(2025, 11, 2, 1, tzinfo=UTC).timestamp())
+    later = timestamp + 3600
+    original = {
+        "data": {
+            "series": [
+                {"read_datetime": timestamp, "gallons": 2},
+                {"read_datetime": timestamp, "gallons": 3},
+                {"read_datetime": later, "gallons": 4},
+            ]
+        }
+    }
+    corrected = {
+        "data": {
+            "series": [
+                {"read_datetime": timestamp, "gallons": 2},
+                {"read_datetime": timestamp, "gallons": 5},
+                {"read_datetime": later, "gallons": 4},
+            ]
+        }
+    }
+    history = localize_history(parse_chart(original), TIMEZONE)
+    merged, changed = merge_history(
+        history, localize_history(parse_chart(corrected), TIMEZONE)
+    )
+    assert sum(history.values()) == 9
+    assert sum(merged.values()) == 11
+    assert changed == min(merged)
+    assert [r["sum"] for r in statistics_rows(merged, changed)] == [7, 11]
