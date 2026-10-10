@@ -50,7 +50,8 @@ and extract it into your Home Assistant configuration directory. Alternatively:
 
 Complete WaterSmart setup and its first successful download before adding water
 consumption. The integration imports historical readings into long-term statistics
-using their original hourly timestamps.
+using their original local dates and hours, interpreted in Home Assistant's
+configured timezone.
 
 1. Open **Settings → Dashboards → Energy**.
 2. Find the **Water consumption** section and select **Add water source** to open
@@ -99,17 +100,39 @@ sensor.watersmart_<account_number>_water_usage_hourly
 
 Its state is **gallons for the latest completed hour returned by the utility**,
 not necessarily the previous wall-clock hour. `reading_start` is that reading's
-UTC timestamp. Additional attributes expose `last_download`, `cached_hours`, and
+UTC timestamp after interpreting the API's encoded date and hour as local wall
+time in Home Assistant's configured timezone. Set that timezone to match your
+utility's timezone. For example, an encoded October 1, 2026 midnight reading in
+`America/Los_Angeles` is stored as October 1 at 07:00 UTC, preserving local midnight
+in charts. `last_download` remains the actual download time in UTC.
+Additional attributes expose `last_download`, `cached_hours`, and
 `historical_statistic_id`. Home Assistant preserves an existing entity registry
 name; name collisions get the usual suffix. Account numbers are normalized to
 valid entity IDs, preserving leading zeros.
 
-All downloaded hours, the last hour, and the last successful download time are
+Raw encoded hours, converted UTC hours, the timezone, the last hour, and the
+last successful download time are
 persisted in `.storage/watersmart.<entry_id>.hourly`. Older data remains cached
-when the API's history window rolls forward. Repeated timestamps are deduplicated;
-revised readings replace earlier values. Missing readings remain unknown.
+when the API's history window rolls forward. Repeated timestamps within a response
+are summed into the same hour. Later downloads replace that hour's total rather
+than accumulating it again; revised readings replace earlier values. Missing
+readings remain unknown.
 The API capture demonstrates a full-history request; unsupported incremental
 query parameters are not invented. Each poll fetches the history and merges it.
+
+On the first successful update after changing to local timestamp interpretation,
+the integration converts legacy cached readings, clears its existing WaterSmart
+statistic, and reimports the retained history at corrected times. Raw hours are
+kept so they are not shifted again on restart. Changing Home Assistant's timezone
+and reloading the integration also rebuilds this statistic from raw hours.
+
+Repeated fall-back readings are combined into one hourly total, assigned to the
+first occurrence of that local hour. This preserves volume without creating two
+separate hourly entries. If the API
+includes a nonexistent spring-forward hour, its volume is combined with the next
+valid hour rather than lost. These transition hours cannot be reconstructed more
+precisely from the encoded timestamps alone. Recorder statistics use whole UTC
+hour buckets; fractional-offset timezones place readings in the containing bucket.
 
 Historical readings are also imported into recorder's long-term statistics as:
 

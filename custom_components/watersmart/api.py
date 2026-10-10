@@ -142,7 +142,7 @@ def account_from_html(html: str) -> str:
 
 
 def parse_chart(payload: object) -> dict[int, float]:
-    """Validate, deduplicate and sort hourly readings (UTC epoch seconds)."""
+    """Validate epoch-encoded local wall hours; coordinator applies the timezone."""
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
         raise WaterSmartError("Unexpected RealTimeChart response")
     data = payload["data"]
@@ -174,8 +174,9 @@ def parse_chart(payload: object) -> dict[int, float]:
                 raise ValueError
         except (KeyError, TypeError, ValueError, OverflowError) as err:
             raise WaterSmartError("Invalid hourly timestamp or volume") from err
-        # The captured API has one duplicate timestamp; last returned value wins.
-        result[timestamp] = gallons
+        # Fall-back hours repeat the encoded timestamp. Combine within this response;
+        # merging a later download replaces this total rather than adding it again.
+        result[timestamp] = result.get(timestamp, 0.0) + gallons
     return dict(sorted(result.items()))
 
 
