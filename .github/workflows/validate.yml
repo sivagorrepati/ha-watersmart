@@ -21,4 +21,4 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: python -m pytest -q
-      - run: python scripts/build_release.py --output dist/watersmart.zip
+      - run: python scripts/build_release.py --output dist/ha-watersmart.zip

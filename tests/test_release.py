@@ -10,9 +10,22 @@ import pytest
 from scripts import build_release, prepare_release
 
 
+def test_component_manifest_and_display_names_match():
+    component = build_release.COMPONENT
+    manifest = json.loads((component / "manifest.json").read_text())
+    assert manifest["domain"] == component.name == "ha_watersmart"
+    assert manifest["name"] == "HA WaterSmart"
+    hacs = json.loads((build_release.ROOT / "hacs.json").read_text())
+    assert hacs["name"] == manifest["name"]
+    for relative in ["strings.json", "translations/en.json"]:
+        assert (
+            json.loads((component / relative).read_text())["title"] == manifest["name"]
+        )
+
+
 @pytest.fixture
 def release_project(tmp_path, monkeypatch):
-    component = tmp_path / "custom_components/watersmart"
+    component = tmp_path / "custom_components/ha_watersmart"
     component.mkdir(parents=True)
     (component / "manifest.json").write_text(json.dumps({"version": "0.1.0"}))
     (component / "__init__.py").write_text('"""Integration."""\n')
@@ -29,22 +42,22 @@ def release_project(tmp_path, monkeypatch):
 
 
 def test_zip_layout_and_exclusions(release_project):
-    output = release_project / "dist/watersmart.zip"
+    output = release_project / "dist/ha-watersmart.zip"
     build_release.build_release(output)
     with ZipFile(output) as archive:
         assert set(archive.namelist()) == {
-            "custom_components/watersmart/manifest.json",
-            "custom_components/watersmart/__init__.py",
-            "custom_components/watersmart/translations/en.json",
+            "custom_components/ha_watersmart/manifest.json",
+            "custom_components/ha_watersmart/__init__.py",
+            "custom_components/ha_watersmart/translations/en.json",
             "LICENSE",
         }
         assert archive.testzip() is None
 
 
 def test_release_keeps_versions_aligned(release_project):
-    build_release.build_release(release_project / "watersmart.zip", "0.2.0")
+    build_release.build_release(release_project / "ha-watersmart.zip", "0.2.0")
     manifest = json.loads(
-        (release_project / "custom_components/watersmart/manifest.json").read_text()
+        (release_project / "custom_components/ha_watersmart/manifest.json").read_text()
     )
     assert manifest["version"] == "0.2.0"
     assert 'version = "0.2.0"' in (release_project / "pyproject.toml").read_text()
@@ -55,9 +68,9 @@ def test_bad_release_version_does_not_mutate_project(release_project, version):
     project_path = release_project / "pyproject.toml"
     before = project_path.read_text()
     with pytest.raises(ValueError):
-        build_release.build_release(release_project / "watersmart.zip", version)
+        build_release.build_release(release_project / "ha-watersmart.zip", version)
     assert project_path.read_text() == before
-    assert not Path(release_project / "watersmart.zip").exists()
+    assert not Path(release_project / "ha-watersmart.zip").exists()
 
 
 @pytest.fixture(params=["v0.1.0", "0.1.0"])
@@ -111,9 +124,9 @@ def test_requested_release_includes_nonconventional_commits(
     assert "Fix account discovery (#1)" in notes
     assert "initial integration" not in notes
     assert (
-        json.loads((root / "custom_components/watersmart/manifest.json").read_text())[
-            "version"
-        ]
+        json.loads(
+            (root / "custom_components/ha_watersmart/manifest.json").read_text()
+        )["version"]
         == "0.1.0"
     )
 

@@ -8,13 +8,13 @@ import aiohttp
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.watersmart import (
+from custom_components.ha_watersmart import (
     async_setup_entry,
     async_unload_entry,
     create_client,
 )
-from custom_components.watersmart.api import AuthenticationError, WaterSmartClient
-from custom_components.watersmart.config_flow import WaterSmartConfigFlow
+from custom_components.ha_watersmart.api import AuthenticationError, WaterSmartClient
+from custom_components.ha_watersmart.config_flow import WaterSmartConfigFlow
 
 DATA = {
     "url": "https://milpitas.watersmart.com",
@@ -65,7 +65,7 @@ async def test_config_validation_preserves_shared_connector(sessions, login_erro
     flow = WaterSmartConfigFlow()
     flow.hass = hass
     with (
-        patch("custom_components.watersmart.config_flow.create_client", make_client),
+        patch("custom_components.ha_watersmart.config_flow.create_client", make_client),
         patch.object(
             WaterSmartClient,
             "login",
@@ -94,9 +94,9 @@ async def test_failed_setup_detaches_session(sessions, error):
     )
     entry = SimpleNamespace(data=DATA)
     with (
-        patch("custom_components.watersmart.create_client", make_client),
+        patch("custom_components.ha_watersmart.create_client", make_client),
         patch(
-            "custom_components.watersmart.WaterSmartCoordinator",
+            "custom_components.ha_watersmart.WaterSmartCoordinator",
             return_value=coordinator,
         ),
         pytest.raises(type(error)),

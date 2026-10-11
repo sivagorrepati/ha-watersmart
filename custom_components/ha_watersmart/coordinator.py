@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import slugify
 
 from .api import AccountMismatchError, AuthenticationError, WaterSmartError
-from .const import CONF_ACCOUNT_NUMBER, DOMAIN, STORAGE_VERSION, UPDATE_INTERVAL
+from .const import CONF_ACCOUNT_NUMBER, DOMAIN, NAME, STORAGE_VERSION, UPDATE_INTERVAL
 from .history import local_hour, localize_history, merge_history, statistics_rows
 
 _LOGGER = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ class WaterSmartCoordinator(DataUpdateCoordinator[dict[int, float]]):
                 {
                     "statistic_id": self.statistic_id,
                     "source": DOMAIN,
-                    "name": f"WaterSmart {self.account_number} hourly water usage",
+                    "name": f"{NAME} {self.account_number} hourly water usage",
                     "unit_of_measurement": "gal",
                     "unit_class": "volume",
                     "mean_type": StatisticMeanType.NONE,
