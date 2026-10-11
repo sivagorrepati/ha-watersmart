@@ -25,9 +25,9 @@ def main() -> None:
     first_release = os.environ["HAS_RELEASE"] == "false"
     requested = os.environ.get("REQUESTED_VERSION", "").strip()
     version = requested or (
-        json.loads((ROOT / "custom_components/watersmart/manifest.json").read_text())[
-            "version"
-        ]
+        json.loads(
+            (ROOT / "custom_components/ha_watersmart/manifest.json").read_text()
+        )["version"]
         if first_release
         else os.environ.get("NEXT_VERSION", "")
     )
@@ -65,7 +65,7 @@ def main() -> None:
             cwd=ROOT,
             text=True,
         )
-        notes = f"# WaterSmart {version}\n\n{commits}"
+        notes = f"# ha-watersmart {version}\n\n{commits}"
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
     (output / "release-notes.md").write_text(notes)

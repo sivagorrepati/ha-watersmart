@@ -3,11 +3,14 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from custom_components.watersmart.api import AuthenticationError
-from custom_components.watersmart.config_flow import (
+from homeassistant.config_entries import HANDLERS
+
+from custom_components.ha_watersmart.api import AuthenticationError
+from custom_components.ha_watersmart.config_flow import (
     WaterSmartConfigFlow,
     credentials_schema,
 )
+from custom_components.ha_watersmart.const import DOMAIN
 
 DATA = {
     "url": "https://milpitas.watersmart.com",
@@ -15,6 +18,11 @@ DATA = {
     "password": "test-password",
     "account_number": "0012345",
 }
+
+
+def test_config_flow_registered_under_renamed_domain():
+    assert DOMAIN == "ha_watersmart"
+    assert HANDLERS.get(DOMAIN) is WaterSmartConfigFlow
 
 
 def test_credentials_form_accepts_inputs_and_defaults():
@@ -34,7 +42,7 @@ async def test_validation_detaches_session_on_error():
         session=SimpleNamespace(detach=Mock(), close=AsyncMock()),
     )
     with patch(
-        "custom_components.watersmart.config_flow.create_client", return_value=client
+        "custom_components.ha_watersmart.config_flow.create_client", return_value=client
     ):
         try:
             await flow._validate(DATA)
@@ -54,6 +62,7 @@ async def test_setup_discovers_account_and_creates_entry():
     flow.async_create_entry = Mock(return_value={"type": "create_entry"})
     result = await flow.async_step_user(DATA)
     assert result["type"] == "create_entry"
+    assert flow.async_create_entry.call_args.kwargs["title"] == "ha-watersmart 0012345"
     flow.async_set_unique_id.assert_awaited_once_with(
         "https://milpitas.watersmart.com_0012345"
     )

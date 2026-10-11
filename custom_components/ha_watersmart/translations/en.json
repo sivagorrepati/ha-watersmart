@@ -1,9 +1,9 @@
 {
-  "title": "WaterSmart",
+  "title": "ha-watersmart",
   "config": {
     "step": {
       "user": {
-        "title": "Connect to WaterSmart",
+        "title": "Connect to ha-watersmart",
         "description": "Sign in to your utility WaterSmart portal. The active account is detected automatically.",
         "data": {
           "url": "Utility portal URL",
@@ -12,7 +12,7 @@
         }
       },
       "reauth_confirm": {
-        "title": "Reauthenticate WaterSmart",
+        "title": "Reauthenticate ha-watersmart",
         "description": "Enter your updated credentials for the same WaterSmart account.",
         "data": {
           "email": "Email",

@@ -8,7 +8,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPONENT = ROOT / "custom_components" / "watersmart"
+COMPONENT = ROOT / "custom_components" / "ha_watersmart"
 VERSION_PATTERN = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
 
 
@@ -40,12 +40,14 @@ def build_release(output: Path, version: str | None = None) -> None:
             if path.is_file() and path.suffix in {".py", ".json"}:
                 archive.write(path, path.relative_to(ROOT).as_posix())
         archive.write(ROOT / "LICENSE", "LICENSE")
-    print(f"Built WaterSmart {manifest['version']}: {output}")
+    print(f"Built ha-watersmart {manifest['version']}: {output}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", help="Set the project and manifest versions")
-    parser.add_argument("--output", type=Path, default=ROOT / "dist" / "watersmart.zip")
+    parser.add_argument(
+        "--output", type=Path, default=ROOT / "dist" / "ha-watersmart.zip"
+    )
     arguments = parser.parse_args()
     build_release(arguments.output, arguments.version)

@@ -12,13 +12,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.watersmart.api import (
+from custom_components.ha_watersmart.api import (
     AuthenticationError,
     WaterSmartError,
     parse_chart,
 )
-from custom_components.watersmart.coordinator import WaterSmartCoordinator
-from custom_components.watersmart.sensor import WaterSmartHourlySensor
+from custom_components.ha_watersmart.coordinator import WaterSmartCoordinator
+from custom_components.ha_watersmart.sensor import WaterSmartHourlySensor
 
 
 @pytest.fixture
@@ -36,6 +36,7 @@ async def coordinator(tmp_path):
     )
     with patch("homeassistant.helpers.frame.report_usage"):
         result = WaterSmartCoordinator(hass, entry, client)
+    assert result.store.key == "ha_watersmart.test_entry.hourly"
     result.store = SimpleNamespace(
         async_load=AsyncMock(return_value=None), async_save=AsyncMock()
     )
@@ -50,7 +51,7 @@ async def test_cache_restart_and_sensor_naming(coordinator):
     }
     await coordinator._async_setup()
     with patch(
-        "custom_components.watersmart.coordinator.async_add_external_statistics"
+        "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
     ) as add:
         coordinator.data = await coordinator._async_update_data()
     assert coordinator.history == {0: 1.0, 3600: 2.0, 7200: 3.0}
@@ -60,7 +61,14 @@ async def test_cache_restart_and_sensor_naming(coordinator):
     assert cached["hours"]["0"] == 1.0
     assert coordinator.update_interval.total_seconds() == 1800
     sensor = WaterSmartHourlySensor(coordinator)
-    assert sensor.entity_id == "sensor.watersmart_0012345_water_usage_hourly"
+    assert sensor.entity_id == "sensor.ha_watersmart_0012345_water_usage_hourly"
+    assert sensor.name == "ha-watersmart 0012345 water usage hourly"
+    assert sensor.device_info["identifiers"] == {
+        ("ha_watersmart", "https://milpitas.watersmart.com_0012345")
+    }
+    assert coordinator.statistic_id == "ha_watersmart:0012345_water_usage_hourly"
+    assert add.call_args.args[1]["source"] == "ha_watersmart"
+    assert add.call_args.args[1]["name"] == "ha-watersmart 0012345 hourly water usage"
     assert sensor.native_value == 3.0
     assert sensor.extra_state_attributes["reading_start"] == "1970-01-01T02:00:00+00:00"
     assert sensor.state_class is None
@@ -68,7 +76,7 @@ async def test_cache_restart_and_sensor_naming(coordinator):
 
 async def test_unchanged_poll_does_not_duplicate_statistics(coordinator):
     with patch(
-        "custom_components.watersmart.coordinator.async_add_external_statistics"
+        "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
     ) as add:
         await coordinator._async_update_data()
         await coordinator._async_update_data()
@@ -78,7 +86,7 @@ async def test_unchanged_poll_does_not_duplicate_statistics(coordinator):
 
 async def test_correction_reimports_affected_tail(coordinator):
     with patch(
-        "custom_components.watersmart.coordinator.async_add_external_statistics"
+        "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
     ) as add:
         await coordinator._async_update_data()
         coordinator.client.fetch_hourly.return_value = {3600: 4.0}
@@ -119,7 +127,7 @@ async def test_current_hour_not_published_as_final(coordinator):
         current_hour: 1.0,
     }
     with patch(
-        "custom_components.watersmart.coordinator.async_add_external_statistics"
+        "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
     ):
         data = await coordinator._async_update_data()
     assert data == {current_hour - 3600: 4.0}
@@ -138,7 +146,7 @@ async def test_legacy_cache_preserved_and_only_new_readings_imported(coordinator
     assert coordinator.history == {raw: 2}
     assert coordinator.last_download == "2026-07-02T00:00:00+00:00"
     with patch(
-        "custom_components.watersmart.coordinator.async_add_external_statistics"
+        "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
     ) as add:
         coordinator.data = await coordinator._async_update_data()
         assert coordinator.history == {raw: 2, raw + 8 * 3600: 3}
@@ -198,7 +206,7 @@ async def test_timezone_change_preserves_existing_cache(coordinator, saved_bound
     assert coordinator._preserve_raw_through == raw
     coordinator.client.fetch_hourly.return_value = {raw: 99, raw + 4 * 3600: 3}
     with patch(
-        "custom_components.watersmart.coordinator.async_add_external_statistics"
+        "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
     ) as add:
         await coordinator._async_update_data()
     assert coordinator.history == {raw + 8 * 3600: 2, raw + 9 * 3600: 3}
@@ -211,7 +219,7 @@ async def test_current_local_hour_not_published(coordinator):
     raw = int(now.replace(tzinfo=UTC).timestamp())
     coordinator.client.fetch_hourly.return_value = {raw - 3600: 4, raw: 1}
     with patch(
-        "custom_components.watersmart.coordinator.async_add_external_statistics"
+        "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
     ):
         data = await coordinator._async_update_data()
     assert data == {int(now.timestamp()) - 3600: 4}
@@ -223,8 +231,10 @@ async def test_fractional_timezone_waits_for_full_hour(coordinator):
     raw = int(datetime(2026, 1, 1, tzinfo=UTC).timestamp())
     coordinator.client.fetch_hourly.return_value = {raw - 3600: 4, raw: 1}
     with (
-        patch("custom_components.watersmart.coordinator.datetime") as clock,
-        patch("custom_components.watersmart.coordinator.async_add_external_statistics"),
+        patch("custom_components.ha_watersmart.coordinator.datetime") as clock,
+        patch(
+            "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
+        ),
     ):
         clock.now.return_value = now.astimezone(UTC)
         data = await coordinator._async_update_data()
@@ -248,7 +258,7 @@ async def test_setup_preserves_existing_data_without_waiting_for_recorder(coordi
             "homeassistant.components.recorder.get_instance", return_value=recorder
         ) as get,
         patch(
-            "custom_components.watersmart.coordinator.async_add_external_statistics"
+            "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
         ) as add,
     ):
         await asyncio.wait_for(
@@ -279,7 +289,7 @@ async def test_repeated_hour_total_survives_polling_and_restart(coordinator):
         }
     )
     with patch(
-        "custom_components.watersmart.coordinator.async_add_external_statistics"
+        "custom_components.ha_watersmart.coordinator.async_add_external_statistics"
     ) as add:
         await coordinator._async_update_data()
         await coordinator._async_update_data()

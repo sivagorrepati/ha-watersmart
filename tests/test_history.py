@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from custom_components.watersmart.history import (
+from custom_components.ha_watersmart.history import (
     local_hour,
     localize_history,
     merge_history,

@@ -5,8 +5,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from custom_components.watersmart.api import parse_chart
-from custom_components.watersmart.history import (
+from custom_components.ha_watersmart.api import parse_chart
+from custom_components.ha_watersmart.history import (
     localize_history,
     merge_history,
     statistics_rows,

@@ -7,7 +7,7 @@ from homeassistant.const import UnitOfVolume
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
-from .const import DOMAIN
+from .const import DOMAIN, NAME
 
 PARALLEL_UPDATES = 0
 
@@ -26,13 +26,13 @@ class WaterSmartHourlySensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator)
         account = coordinator.account_number
-        object_id = f"watersmart_{slugify(account)}_water_usage_hourly"
+        object_id = f"{DOMAIN}_{slugify(account)}_water_usage_hourly"
         self._attr_unique_id = f"{coordinator.client.url}_{account}_water_usage_hourly"
-        self._attr_name = f"WaterSmart {account} water usage hourly"
+        self._attr_name = f"{NAME} {account} water usage hourly"
         self.entity_id = f"sensor.{object_id}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{coordinator.client.url}_{account}")},
-            "name": f"WaterSmart {account}",
+            "name": f"{NAME} {account}",
             "manufacturer": "WaterSmart",
         }
 

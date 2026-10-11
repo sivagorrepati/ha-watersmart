@@ -13,7 +13,7 @@ from .api import (
     WaterSmartError,
     normalize_url,
 )
-from .const import CONF_ACCOUNT_NUMBER, DEFAULT_URL, DOMAIN
+from .const import CONF_ACCOUNT_NUMBER, DEFAULT_URL, DOMAIN, NAME
 
 
 def credentials_schema(defaults: dict, include_url: bool = True) -> vol.Schema:
@@ -81,7 +81,7 @@ class WaterSmartConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return self.async_update_reload_and_abort(entry, data_updates=data)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=f"WaterSmart {data[CONF_ACCOUNT_NUMBER]}", data=data
+                    title=f"{NAME} {data[CONF_ACCOUNT_NUMBER]}", data=data
                 )
         return self.async_show_form(
             step_id=step,

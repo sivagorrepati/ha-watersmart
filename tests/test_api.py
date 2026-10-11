@@ -7,7 +7,7 @@ import aiohttp
 import pytest
 from yarl import URL
 
-from custom_components.watersmart.api import (
+from custom_components.ha_watersmart.api import (
     CHART_PATH,
     HOME_PATH,
     LOGIN_PATH,
