@@ -62,7 +62,7 @@ async def test_setup_discovers_account_and_creates_entry():
     flow.async_create_entry = Mock(return_value={"type": "create_entry"})
     result = await flow.async_step_user(DATA)
     assert result["type"] == "create_entry"
-    assert flow.async_create_entry.call_args.kwargs["title"] == "ha-watersmart 0012345"
+    assert flow.async_create_entry.call_args.kwargs["title"] == "HA WaterSmart 0012345"
     flow.async_set_unique_id.assert_awaited_once_with(
         "https://milpitas.watersmart.com_0012345"
     )

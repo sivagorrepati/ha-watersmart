@@ -62,13 +62,13 @@ async def test_cache_restart_and_sensor_naming(coordinator):
     assert coordinator.update_interval.total_seconds() == 1800
     sensor = WaterSmartHourlySensor(coordinator)
     assert sensor.entity_id == "sensor.ha_watersmart_0012345_water_usage_hourly"
-    assert sensor.name == "ha-watersmart 0012345 water usage hourly"
+    assert sensor.name == "HA WaterSmart 0012345 water usage hourly"
     assert sensor.device_info["identifiers"] == {
         ("ha_watersmart", "https://milpitas.watersmart.com_0012345")
     }
     assert coordinator.statistic_id == "ha_watersmart:0012345_water_usage_hourly"
     assert add.call_args.args[1]["source"] == "ha_watersmart"
-    assert add.call_args.args[1]["name"] == "ha-watersmart 0012345 hourly water usage"
+    assert add.call_args.args[1]["name"] == "HA WaterSmart 0012345 hourly water usage"
     assert sensor.native_value == 3.0
     assert sensor.extra_state_attributes["reading_start"] == "1970-01-01T02:00:00+00:00"
     assert sensor.state_class is None

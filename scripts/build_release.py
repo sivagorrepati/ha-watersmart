@@ -40,7 +40,7 @@ def build_release(output: Path, version: str | None = None) -> None:
             if path.is_file() and path.suffix in {".py", ".json"}:
                 archive.write(path, path.relative_to(ROOT).as_posix())
         archive.write(ROOT / "LICENSE", "LICENSE")
-    print(f"Built ha-watersmart {manifest['version']}: {output}")
+    print(f"Built HA WaterSmart {manifest['version']}: {output}")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ def test_component_manifest_and_display_names_match():
     component = build_release.COMPONENT
     manifest = json.loads((component / "manifest.json").read_text())
     assert manifest["domain"] == component.name == "ha_watersmart"
-    assert manifest["name"] == "ha-watersmart"
+    assert manifest["name"] == "HA WaterSmart"
     hacs = json.loads((build_release.ROOT / "hacs.json").read_text())
     assert hacs["name"] == manifest["name"]
     for relative in ["strings.json", "translations/en.json"]:

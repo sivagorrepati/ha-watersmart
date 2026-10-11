@@ -65,7 +65,7 @@ def main() -> None:
             cwd=ROOT,
             text=True,
         )
-        notes = f"# ha-watersmart {version}\n\n{commits}"
+        notes = f"# HA WaterSmart {version}\n\n{commits}"
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
     (output / "release-notes.md").write_text(notes)
