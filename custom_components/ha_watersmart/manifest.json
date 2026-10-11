@@ -1,7 +1,7 @@
 {
   "domain": "ha_watersmart",
   "name": "HA WaterSmart",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "documentation": "https://github.com/sivagorrepati/ha-watersmart",
   "issue_tracker": "https://github.com/sivagorrepati/ha-watersmart/issues",
   "config_flow": true,
